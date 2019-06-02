@@ -1,29 +1,26 @@
 const { findSupportedBrowsers } = require('@open-wc/building-utils');
 const path = require('path');
-const HtmlWebpackPlugin = require('html-webpack-plugin');
+const WebpackIndexHTMLPlugin = require('@open-wc/webpack-index-html-plugin');
 const CleanWebpackPlugin = require('clean-webpack-plugin');
 const TerserPlugin = require('terser-webpack-plugin');
-const ModernWebWebpackPlugin = require('./modern-web-webpack-plugin');
 
 const development = !process.argv.find(arg => arg.includes('production'));
 const legacy = process.argv.find(arg => arg.includes('legacy'));
 
-const prefix = '[@open-wc/building-webpack/modern-and-legacy-config]:';
-const { queryAll, predicates, getAttribute } = require('./dom5-fork/index.js');
-const { readHTML } = require('./src/utils.js');
-
-const modernWebWebpackPlugin = new ModernWebWebpackPlugin({ development });
-
 const defaultOptions = {
   indexHTML: './index.html',
-  entry: './index.js',
-  htmlEntryPoint: false,
 };
 
 /* eslint-disable-next-line no-shadow */
 function createConfig(options, legacy) {
+  if (options.entry) {
+    throw new Error(
+      `entry in config is deprecated. Use the 'input' field and point it to your index.html`,
+    );
+  }
+
   return {
-    entry: Array.isArray(options.entry) ? options.entry : [options.entry],
+    entry: options.input,
 
     output: {
       filename: `${legacy ? 'legacy/' : ''}[name].[chunkhash].js`,
@@ -85,10 +82,6 @@ function createConfig(options, legacy) {
             },
           },
         },
-        options.htmlEntryPoint && {
-          test: options.input,
-          loader: require.resolve('./src/clean-up-html-loader.js'),
-        },
       ].filter(_ => !!_),
     },
 
@@ -111,12 +104,15 @@ function createConfig(options, legacy) {
       // @ts-ignore
       !development && new CleanWebpackPlugin(),
 
-      new HtmlWebpackPlugin({
-        template: options.indexHTML,
-        inject: false,
+      new WebpackIndexHTMLPlugin({
+        multiBuild: !development,
+        legacy,
+        polyfills: {
+          coreJs: true,
+          webcomponents: true,
+          fetch: true,
+        },
       }),
-
-      modernWebWebpackPlugin,
     ].filter(_ => !!_),
 
     devServer: {
@@ -136,28 +132,6 @@ module.exports = userOptions => {
     ...defaultOptions,
     ...userOptions,
   };
-
-  if (typeof options.input === 'string' && options.input.endsWith('index.html')) {
-    options.indexHTML = options.input;
-    options.htmlEntryPoint = true;
-    const indexHTML = readHTML(options.input);
-    const scripts = queryAll(indexHTML, predicates.hasTagName('script'));
-    const moduleScripts = scripts.filter(script => getAttribute(script, 'type') === 'module');
-
-    if (moduleScripts.length === 0) {
-      throw new Error(
-        `${prefix} Could not find any module script in configured input: ${options.input}`,
-      );
-    }
-
-    if (moduleScripts.some(script => !getAttribute(script, 'src'))) {
-      throw new Error(`${prefix} Module scripts without a 'src' attribute are not supported.`);
-    }
-    const indexDir = path.dirname(options.input);
-
-    const modules = moduleScripts.map(script => getAttribute(script, 'src'));
-    options.entry = modules.map(p => path.join(indexDir, p));
-  }
 
   if (development) {
     return createConfig(options, legacy);
